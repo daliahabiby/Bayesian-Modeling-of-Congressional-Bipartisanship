@@ -1,0 +1,211 @@
+---
+title: "Varying-Intercept Modeling of Congressional Bipartisanship"
+author: "Dalia Habiby"
+date: "2022-12-07"
+output: pdf_document
+---
+
+# Data and Methods
+
+|       The model of interest in this paper measures the strength of bipartisanship in Congress by evaluating observations about individual votes on various bills. I am utilizing the data set "Important Congressional Votes, 1991-2020" for this model, created by Jordan Tama for the purpose of investigating consequential voting patterns and political polarization. The data are collected from the Congressional Quarterly Almanac, defining "important" votes in Congress as those appearing in the CQ Almanac's yearly "Key Votes" report, which are the most major issues upon which Congress acted. The data set has 59 variables measuring different aspects of the vote on a specific legislation, including tallies for the Democratic and Republican party votes, ratios of bipartisanship and consensus, the type of vote, and other identifying information. There are 3,445 observations in total from 1991 to 2020, however they are not all complete cases. Many variables were missing 1551 observations, including the strength of bipartisanship measure, while a few others were missing over 2800 observations. Therefore, I utilized multiple imputation with 5 iterations, running the model 5 times on separate imputations and then averaging the results together.  
+
+|       This paper investigates the question: Is there a correlation between strength of Congressional bipartisanship and year of vote, congress number, whether the vote was on domestic policy, and whether the vote happened during an election year. I am using a varying-intercept multilevel model in JAGS with the form $y_{i} = \alpha_{j[i]} + \beta_{1}x_{i} + \beta_{2}x_{i}+ \beta_{3}x_{i} + \epsilon_{i}$. I decided to use a varying intercept model in order to explore the aforementioned relationship while investigating different intercepts for each Congress number. I hypothesize that there will be bigger differences between Congresses than within each formation of Congress. Furthermore, I expect that there will be less strength of bipartisan as the year increases, less bipartisanship during an election year, and and less bipartisanship when the bill is domestic policy. These expectations stem from the growing discourse about political polarization in the news media as well as in academia. Bipartisanship has been often striven for, yet rarely achieved in the recent election cycles, which has halted many bills from making it to the President's desk. Additionally, I expect Congress to be more unified on foreign affairs than domestic policy, and that there would be less agreement during a congressional election year since Congressmembers might try to accentuate their partisanship in the public eye. 
+
+|       Below, I have summarized the data set limited to the variables that are most pertinent to my research question. These variables are as follows: "Strengthofbipartisanship" measures bipartisanship given the following equation: 1 - (the absolute value of (the share of Republicans voting in favor of the legislation - the share of Democrats voting in favor of the legislation). "Year" describes the year in which the vote happened. "Electionyear" is an indicator variable with 0 given that the vote did not happen in an election year and 1 if it did. "Domesticpolicy" is also an indicator variable, with 0 given that the bill was not domestic policy and 1 when it was. "Congressnumber" ranges from 102-116, representing the number of the unique makeup of Congress between elections. Due to the nature of the JAGS model process, I recoded the "congressnumber" variable to span from 1 to 15 (where 1 is 102 and 15 is 116) to facilitate the subsetting of this variable to create distinct intercepts for each Congress. Similarly, I recoded the "year" variable to range from 1 to 30 (where 1 is 1991 and 30 is 2020) in order to rescale the outputs. The vectors of these two variables appear in descending order, as this is their order within the dataset. 
+
+
+# Model Code
+
+```{r, include=FALSE}
+suppressMessages(library(tidyr))
+suppressMessages(library(dplyr))
+suppressMessages(library(ggplot2))
+suppressMessages(library(tidyverse))
+suppressMessages(library(haven))
+library(mice)
+```
+
+```{r, include=FALSE, warning=FALSE}
+#impvotes<-mice(votes, m = 5)
+#saveRDS(impvotes, file = "multipleimputedvotes.rds")
+micevotes<- readRDS("multipleimputedvotes.rds")
+```
+
+```{r, warning=FALSE, include = FALSE}
+votes.mids <- lm.mids(strengthofbipartisanship ~ year+ electionyear + domesticpolicy, data=micevotes)
+summary(pool(votes.mids))
+```
+
+```{r, include=FALSE}
+votes.array <- array(NA,c(dim(votes),5))
+for (i in 1:5) votes.array[,,i] <- as.matrix(complete(micevotes,i))
+```
+
+
+```{r,  include=FALSE, message = FALSE}
+lapply(c("rjags", "R2jags", "coda", "superdiag", "R2WinBUGS"), library, character.only= TRUE)
+```
+
+```{r, echo=FALSE}
+impvotes1<- data.frame(votes.array[,,1])
+names(impvotes1)<- names(votes)
+impvotes1$strengthofbipartisanship<- as.numeric(impvotes1$strengthofbipartisanship)
+impvotes1$electionyear<- as.numeric(impvotes1$electionyear)
+impvotes1$domesticpolicy<- as.numeric(impvotes1$domesticpolicy)
+impvotes1$year<- as.numeric(impvotes1$year)
+impvotes1$congressnumber<- as.numeric(impvotes1$congressnumber)
+summary(impvotes1%>%
+  dplyr::select(strengthofbipartisanship, electionyear, domesticpolicy, year, congressnumber))
+```
+
+
+```{r, results = 'hide'}
+jags.out.mean <- jags.out.se <- jags.out.2.5 <- jags.out.25 <- jags.out.50<- jags.out.75 <- jags.out.97.5<- jags.out.Rhat <- jags.out.n.eff <- asap.mat.a1<- asap.mat.a2<- asap.mat.a3<- asap.mat.a4<- asap.mat.a5 <- asap.mat.a6<- asap.mat.a7<- asap.mat.a8<- asap.mat.a9 <- asap.mat.a10 <- asap.mat.a11 <- asap.mat.a12 <- asap.mat.a13 <- asap.mat.a14 <- asap.mat.a15 <- asap.mat.a16 <- asap.mat.a17 <- asap.mat.a18 <- asap.mat.a19 <- asap.mat.a20 <- asap.mat.a21 <-NULL
+asap.mat.list<-list()
+for (i in 1:5) {
+current.votes.dat <- data.frame(votes.array[,,i])
+names(current.votes.dat) <- names(votes)
+counts<- current.votes.dat%>%
+  count(congressnumber)%>%
+  arrange(desc(congressnumber))
+
+conrep<- vector()
+connum_vec<- list()
+for(i in 1:15){
+  n<- counts$n[i]
+  yr<- c(15:1)
+  conrep<- rep(yr[i], n)
+  connum_vec[i]<- list(conrep)
+}
+
+counts2<- current.votes.dat%>%
+  count(year)%>%
+  arrange(desc(year))
+
+yrrep<- vector()
+yr_vec<- list()
+for(i in 1:30){
+  n<- counts2$n[i]
+  yr<- c(30:1)
+  yrrep<- rep(yr[i], n)
+  yr_vec[i]<- list(yrrep)
+}
+
+y<- as.numeric(current.votes.dat$strengthofbipartisanship)
+N<- length(y)
+J<- length(unique(current.votes.dat$congressnumber))
+elecyr<- as.numeric(current.votes.dat$electionyear) 
+domestic<- as.numeric(current.votes.dat$domesticpolicy)
+year_vec<- as.numeric(unlist(yr_vec))
+congressnum<-as.numeric(unlist(connum_vec))
+
+votes.model <- function() {
+  for (i in 1:N){
+    y[i] ~ dnorm(y.hat[i], tau.y)
+    y.hat[i] <- a[congressnum[i]] + b1*elecyr[i] + b2*domestic[i] + b3*year_vec[i]
+  }
+  b1 ~ dnorm(0, .0001)
+  b2 ~ dnorm(0, .0001)
+  b3 ~ dnorm(0, .0001)
+  tau.y <- pow(sigma.y, -2)
+  sigma.y ~ dunif (0, 100)
+  for (j in 1:J){
+    a[j] ~ dnorm (mu.a, tau.a)
+  }
+  mu.a ~ dnorm(0, 0.0001)
+  tau.a <- pow(sigma.a, -2)
+  sigma.a ~ dunif (0, 100)
+}
+
+votes.data <- list("N","J","y","congressnum","elecyr", "domestic", "year_vec")
+votes.inits <- function(){
+list(a=rnorm(J), b1=rnorm(1), b2=rnorm(1), b3=rnorm(1),
+sigma.y=runif(1), sigma.a=runif(1))}
+votes.params <- c("a", "b1", "b2", "b3", "sigma.y", "sigma.a", "mu.a")
+
+write.model(votes.model, "votes.model.rjags")
+
+set.seed(12)
+votes.jags.out <- jags(data=votes.data, inits=votes.inits,
+parameters.to.save=votes.params,
+model="votes.model.rjags", n.chains=3, n.iter=400000, DIC=F)
+set.seed(12)
+update.out<- update(votes.jags.out, n.iter=400000, n.chains=3)
+
+jags.out.mean <- cbind(jags.out.mean, update.out$BUGSoutput$summary[c(1:3, 13:21),1])
+jags.out.se <- cbind(jags.out.se, update.out$BUGSoutput$summary[c(1:3, 13:21),2])
+jags.out.2.5 <- cbind(jags.out.2.5, update.out$BUGSoutput$summary[c(1:3, 13:21),3])
+jags.out.25 <- cbind(jags.out.25, update.out$BUGSoutput$summary[c(1:3, 13:21),4])
+jags.out.50<- cbind(jags.out.50, update.out$BUGSoutput$summary[c(1:3, 13:21),5])
+jags.out.75 <- cbind(jags.out.75, update.out$BUGSoutput$summary[c(1:3, 13:21),6])
+jags.out.97.5<- cbind(jags.out.97.5, update.out$BUGSoutput$summary[c(1:3, 13:21),7])
+jags.out.Rhat <- cbind(jags.out.Rhat, update.out$BUGSoutput$summary[c(1:3, 13:21),8])
+jags.out.n.eff<- cbind(jags.out.n.eff, update.out$BUGSoutput$summary[c(1:3, 13:21),9])
+
+asap.mat.a1<- cbind(asap.mat.a1, update.out$BUGSoutput$sims.array[,1,1])
+asap.mat.a2<- cbind(asap.mat.a2, update.out$BUGSoutput$sims.array[,1,2])
+asap.mat.a3<- cbind(asap.mat.a3, update.out$BUGSoutput$sims.array[,1,3])
+asap.mat.a4<- cbind(asap.mat.a4, update.out$BUGSoutput$sims.array[,1,4])
+asap.mat.a5<- cbind(asap.mat.a5, update.out$BUGSoutput$sims.array[,1,5])
+asap.mat.a6<- cbind(asap.mat.a6, update.out$BUGSoutput$sims.array[,1,6])
+asap.mat.a7<- cbind(asap.mat.a7, update.out$BUGSoutput$sims.array[,1,7])
+asap.mat.a8<- cbind(asap.mat.a8, update.out$BUGSoutput$sims.array[,1,8])
+asap.mat.a9<- cbind(asap.mat.a9, update.out$BUGSoutput$sims.array[,1,9])
+asap.mat.a10<- cbind(asap.mat.a10, update.out$BUGSoutput$sims.array[,1,10])
+asap.mat.a11<- cbind(asap.mat.a11, update.out$BUGSoutput$sims.array[,1,11])
+asap.mat.a12<- cbind(asap.mat.a12, update.out$BUGSoutput$sims.array[,1,12])
+asap.mat.a13<- cbind(asap.mat.a13, update.out$BUGSoutput$sims.array[,1,13])
+asap.mat.a14<- cbind(asap.mat.a14, update.out$BUGSoutput$sims.array[,1,14])
+asap.mat.a15<- cbind(asap.mat.a15, update.out$BUGSoutput$sims.array[,1,15])
+asap.mat.a16<- cbind(asap.mat.a16, update.out$BUGSoutput$sims.array[,1,16])
+asap.mat.a17<- cbind(asap.mat.a17, update.out$BUGSoutput$sims.array[,1,17])
+asap.mat.a18<- cbind(asap.mat.a18, update.out$BUGSoutput$sims.array[,1,18])
+asap.mat.a19<- cbind(asap.mat.a19, update.out$BUGSoutput$sims.array[,1,19])
+asap.mat.a20<- cbind(asap.mat.a20, update.out$BUGSoutput$sims.array[,1,20])
+asap.mat.a21<- cbind(asap.mat.a21, update.out$BUGSoutput$sims.array[,1,21])
+}
+```
+
+```{r}
+
+avg.output<- data.frame(mean = rowMeans(jags.out.mean), sd =  rowMeans(jags.out.se), "2.5%"= rowMeans(jags.out.2.5), `25%` = rowMeans(jags.out.25), `75%`= rowMeans(jags.out.75), `97.5%` = rowMeans(jags.out.97.5), Rhat = rowMeans(jags.out.Rhat), n.eff = rowMeans(jags.out.n.eff))
+
+names(avg.output)<- c("mean", "sd", "2.5%", "25%", "75%", "97.5%", "Rhat", "n.eff")
+
+knitr::kable(avg.output,
+digits = 3, caption = "Multiple Imputed Varying Intercepts Model, Abbreviated")
+
+asap.mat<- data.frame(a1= rowMeans(asap.mat.a1), a2 = rowMeans(asap.mat.a2), a3 = rowMeans(asap.mat.a3), a4 = rowMeans(asap.mat.a4), a5 = rowMeans(asap.mat.a5), a6= rowMeans(asap.mat.a6), a7 = rowMeans(asap.mat.a7), a8= rowMeans(asap.mat.a8), a9= rowMeans(asap.mat.a9), a10 = rowMeans(asap.mat.a10), a11 = rowMeans(asap.mat.a11), a12 = rowMeans(asap.mat.a12), a13 = rowMeans(asap.mat.a13), a14= rowMeans(asap.mat.a14), a15 = rowMeans(asap.mat.a15), a16 = rowMeans(asap.mat.a16), a17 = rowMeans(asap.mat.a17), a18 = rowMeans(asap.mat.a18), a19 = rowMeans(asap.mat.a19), a20 = rowMeans(asap.mat.a20), a21 = rowMeans(asap.mat.a21))
+names(asap.mat) <- names(as.data.frame(update.out$BUGSoutput$sims.array[,1,]))
+
+asap.mcmc<- mcmc(as.matrix(asap.mat))
+convergence<- superdiag(asap.mcmc, burnin = 100000)
+convergence$geweke
+convergence$heidel
+convergence$raftery
+convergence$hellinger
+
+plot.mat<- asap.mat[c(16:21)]
+plot.mcmc<- mcmc(as.matrix(plot.mat))
+convergence.plot<- superdiag(plot.mcmc, burnin = 100000, plot = TRUE)
+
+
+```
+
+# Results
+
+|       The table above shows a summarized version of the model results, with the first three and last three intercepts, as well as the three predictor coefficients, mean of the intercepts, the standard deviation of y and the standard deviation of alpha. The results show that the estimates on the group-level parameters vary, with an average intercept of 0.664 that is precisely estimated with a standard error of 0.067. This is what I expected, as given the changing political climate each iteration of congress will have a slightly different starting point for their bipartisanship measure. This may be due to the previous Congressional group setting a precedent for the political climate and the newer members adopting the resulting partisan outlook each time. However, contrary to my prediction, the estimated within-Congress standard deviation, 0.331 or sigma.y, is larger than the estimated between-Congress standard deviation, 0.128 or sigma.a. This means that there is less variation between distinct Congresses than there is within each one. In other words, the strength of bipartisanship regarding "important" or key legislation varies more within each Congress group than it does across groups, and thus the Congresses are more similar than I had assumed. 
+
+|       The estimate of the parameter on whether or not the vote was held during a Congressional election year is 0.022. It is precise with a standard error of 0.013 and statistically distinguishable from zero at the 25%-75% interval, but not at the 2.5%-97.5% interval, as seen in the quantile values. This suggests that on average with all other predictors held constant, when a vote occurs during an election year, there is weak evidence that the percentage strength of bipartisanship increases by about 2.2 percentage points. This result is also unexpected, as I had predicted election years to make votes more contentious. This finding suggests that perhaps bipartisanship increases in an effort from incumbent candidates to show voters that they are effective.  
+
+|       The estimate of the domestic policy indicator is -0.119 with a standard error of 0.011 showing precision, and it is statistically distinguishable from zero as represented by the quantile values. This estimate suggests that on average with all other predictors held constant, when a vote is on a domestic policy bill, the strength of bipartisanship decreases by about 11.9 percentage points, or 0.119. This finding was expected, because domestic policy tends to be more controversial and involve more topic areas with clear partisan divides and strong party platforms. This also upholds that foreign policy votes are more bipartisan, which could be explained by national views on other countries being more unified. 
+
+|       The estimate of the year parameter is -0.005 with a precise standard error of 0.004 and it is also statistically distinguishable from zero at the 25%-75% interval, but not at the 2.5%-97.5% interval given the quantile values. This estimate suggests that when all other variables are held constant, we have weak evidence that on average a one unit increase in year corresponds with a decrease of 0.009 or 0.9 percentage points in strength of bipartisanship in Congress. This variable was of particular interest regarding the research question. It is often claimed and debated that political polarization has increased in the past few decades, and this model supports that claim. It is unclear why strength of bipartisanship has decreased over time, but some prominent arguments include social media and the widespread access to political discourse with people across the country, partisan redistricting practices, and major party platforms becoming more distinguishable.
+
+|       In exploring the convergence and robustness of this model, I took various precautions and executed multiple evaluations. I initially ran the model with case-wise deleted data knowing that it would be biased. The case-wise deleted model resulted in the three predictor estimates and the intercepts all having slightly higher magnitude than those in this multiple imputed model, and all of them being strongly statistically distinguishable from zero. Furthermore, the case-wise deleted model showed less variation between Congresses (sigma.a) than this model does. 
+
+|       The first attempt at this multiple imputation model ran 200,000 iterations and 3 chains, though the convergence test results and trace plots indicated that that the model had not converged. My next attempt with 300,000 iterations and 3 chains was better, though not optimal in terms of the R.hat and N.eff column values as well as the trace plots. The final model presented above ran 400,000 iterations and 3 chains. The resulting tests, trace plots, R.hat values and n.eff values indicated that the model had converged and reached the stationary distribution.
+
+|       By looking at the output table R.hat and n.eff columns, we can see strong evidence of convergence. The R.hat values of 1.001 illustrate clearly that the algorithm converged, and the n.eff values suggest that the parameter estimates are precise because there are enough effective simulations. The trace plots displayed above indicate little to no pattern or wavering for each parameter of interest, which clearly shows convergence. They also depict that the first 100,000 iterations were not graphed or convergence tested through the use of the "burnin" argument. Furthermore, the model passed the Heidelberger-Welch, Raftery-Lewis, and Hellinger distance diagnostics, indicating that there was no evidence of nonconvergence.
+
+|       This multilevel model concluded that although the strength of bipartisanship ratio in Congress varies between each unique Congress group, this variability does not outweigh the variation within each Congress itself. Therefore, it is only slightly beneficial to vary the intercepts by Congress number. However, I would argue that the variation it explains at the group level is beneficial enough to remain in the model, keeping the sigma.a of 0.128 from adding onto the sigma.y of 0.331. Furthermore, the model indicates correlations of differing strengths between congressional election years and increased strength of bipartisanship, domestic policy and a decrease in strength of bipartisanship, as well as a decrease in strength of bipartisanship as the year in which voting occurs increases. The reasons behind these relationships are yet unlcear, but these findings lay a foundation for future research investigating what may have caused them.
